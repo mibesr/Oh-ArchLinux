@@ -1,8 +1,20 @@
 #!/bin/bash
-# Arch iScript
+# Description: A simple Archlinux installation script
 # Author: Tsujidou Akari (chiey.qs@gmail.com)
 # Date: 2012-10-06
-# Version: 0.1
+# Version: 0.1.2
+
+function enable_pure_systemd()
+{
+	read -p ": Do you want enable system boot with pure systemd [yn]: " f_sysd
+	if [ 'y' == $f_sysd ]; then
+		arch-chroot /mnt /bin/bash -c "systemctl enable syslog-ng.service"
+		arch-chroot /mnt /bin/bash -c "sed -i 's/.*quiet$/&\ init\=\/sbin\/init/g' /boot/grub/grub.cfg"
+		arch-chroot /mnt /bin/bash -c "sed -i 's/^DAEMON\)$/DAEMONS\=\(\)/g' /etc/rc.conf"
+	else
+		echo ": Mixed systemd/initscript booting, skip."
+	fi
+}
 
 read -p ": Is LVM used [yn]: " f_lvm
 read -p ": Enter full path of Root partition: " p_root
@@ -26,36 +38,42 @@ if [ 'y' == $f_lvm ]; then
 fi
 echo ": Generate fstab file..."
 genfstab -p /mnt >/mnt/etc/fstab
-read -p ": Enter mirror site here (SPACE to split): " mirror
 mv /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.pacbak
-for mirrorst in $mirror; do
-	echo $mirrorst >>/etc/pacman.d/mirrorlist
+until [[ '' == $mirror ]]; do
+	read -p ": Enter a mirror url, NOTHING to exit: " mirror
+	echo $mirror >>/etc/pacman.d/mirrorlist
 done
 echo "ftp://ftp.archlinux.org/\$repo/os/\$arch" >>/etc/pacman.d/mirrorlist
 echo ": Download base package group..."
-pacstrap /mnt base base-devel grub-bios systemd systemd-arch-units systemd-sysvcompat
+pacstrap /mnt base base-devel grub-bios systemd systemd-arch-units 
 echo ": Generate base locale for the setup script..."
 mv /mnt/etc/locale.gen /mnt/etc/locale.gen.pacbak
 echo en_US.UTF-8 >/mnt/etc/locale.gen
 arch-chroot /mnt /bin/bash -c "locale-gen"
 echo LANG=en_US.UTF-8 >/etc/locale.conf
 echo ": Setting timezone..."
-read -p ": Your area is " my_area
-read -p ": Your country is " my_country
+my_area=Asia
+my_country=Shanghai
+read -p ": Your area is (default to Asia): " my_area
+read -p ": Your country is (default to Shanghai): " my_country
 arch-chroot /mnt /bin/bash -c "ln -s /usr/share/zoneinfo/$my_area/$my_country /etc/localtime"
 echo "$my_area/$my_country" >/mnt/etc/timezone
-read -p ": Set hwclock to utc or localtime " tzflg
+tzflg=utc
+read -p ": Set hwclock to utc or localtime (default to utc): " tzflg
 arch-chroot /mnt /bin/bash -c "hwlock --systohc --$tzflg"
 read -p ": Enter your hostname here: " hostnm
 echo $hostnm >/mnt/etc/hostname
-sed -n "6,7s/archiso/$hostnm/g" /etc/hosts >/mnt/etc/hosts
+sed -i 's/.*localhost$/&\ $hostnm/g' /mnt/etc/hosts
 echo ": Create an initial ramdisk..."
 if [ 'y' == $f_lvm ]; then
-	sed -in '59s/filesystem/lvm2 filesystem/g' /mnt/etc/mkinitcpio.conf
+	#sed -i -n '59s/filesystem/lvm2 filesystem/g' /mnt/etc/mkinitcpio.conf
+	sed -i 's/^HOOKS=.*sata/&\ lvm2/g' /mnt/etc/mkinitcpio.conf
 fi
 arch-chroot /mnt /bin/bash -c "cd /boot && mkinitcpio -p linux"
 echo ": Install grub boot loader..."
 arch-chroot /mnt /bin/bash -c "grub-install /dev/sda && grub-mkconfig -p /boot/grub/grub.cfg"
+# Change to systemd...
+enable_pure_systemd()
 echo ": Unmount all mounted filesystem..."
 umount /mnt/home
 umount /mnt
